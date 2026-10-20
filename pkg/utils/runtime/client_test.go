@@ -362,3 +362,44 @@ func TestCallAuthorizationHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryRuntimeCall(t *testing.T) {
+	transient := errors.New("transient runtime failure")
+	tests := []struct {
+		name      string
+		backoff   wait.Backoff
+		succeedAt int
+		cancel    bool
+		wantCalls int
+		wantErr   error
+	}{
+		{name: "cap preserves attempt budget", backoff: wait.Backoff{Duration: time.Millisecond, Factor: 2, Cap: 3 * time.Millisecond, Steps: 5}, succeedAt: 5, wantCalls: 5},
+		{name: "exhaustion preserves last error", backoff: wait.Backoff{Duration: time.Millisecond, Factor: 2, Cap: 3 * time.Millisecond, Steps: 5}, wantCalls: 5, wantErr: transient},
+		{name: "cancel interrupts long backoff", backoff: wait.Backoff{Duration: time.Hour, Steps: 5}, cancel: true, wantCalls: 1, wantErr: context.Canceled},
+		{name: "single attempt disables retry", backoff: wait.Backoff{Steps: 1}, wantCalls: 1, wantErr: transient},
+		{name: "zero steps sends no request", backoff: wait.Backoff{}, wantErr: wait.ErrWaitTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			calls := 0
+			err := retryRuntimeCall(ctx, tt.backoff, func() error {
+				calls++
+				if tt.cancel {
+					time.AfterFunc(10*time.Millisecond, cancel)
+				}
+				if calls == tt.succeedAt {
+					return nil
+				}
+				return transient
+			})
+			require.Equal(t, tt.wantCalls, calls)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
