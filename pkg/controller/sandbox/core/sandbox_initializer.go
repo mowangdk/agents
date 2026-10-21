@@ -166,11 +166,12 @@ func Initialize(ctx context.Context, box *agentsv1alpha1.Sandbox, newStatus *age
 		initialized := utils.GetSandboxCondition(newStatus, string(agentsv1alpha1.RuntimeInitialized))
 		if len(rtOpts) > 0 && resumed != nil && resumed.Status == metav1.ConditionTrue &&
 			initialized != nil && initialized.Status != metav1.ConditionTrue {
+			// Four exponential waits starting at 125ms end at 1s. Avoid Cap:
+			// retry.OnError stops early when wait.Backoff reaches it.
 			mountOpts = append(append([]utilruntime.Option(nil), rtOpts...), utilruntime.WithRetry(wait.Backoff{
-				Duration: 200 * time.Millisecond,
+				Duration: 125 * time.Millisecond,
 				Factor:   2,
 				Steps:    5,
-				Cap:      time.Second,
 			}))
 		}
 

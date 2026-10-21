@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	agentsv1alpha1 "github.com/openkruise/agents/api/v1alpha1"
@@ -115,8 +116,8 @@ func WithRequestTimeout(d time.Duration) Option {
 
 // WithRetry overrides the retry schedule. Retry is enabled by default
 // (defaultRetryBackoff); pass a backoff with Steps: 1 to effectively disable
-// retries (Steps: 0 would never send the request at all). Cap limits each delay
-// without reducing the number of attempts. Only transient failures are retried: transport errors, an unresolved runtime URL, refresh
+// retries (Steps: 0 would never send the request at all). Only transient
+// failures are retried: transport errors, an unresolved runtime URL, refresh
 // errors and HTTP 5xx. A 4xx *APIError is permanent and is never retried.
 func WithRetry(backoff wait.Backoff) Option {
 	return func(rc *runtimeClient) {
@@ -422,7 +423,7 @@ func (e *APIError) IsClientError() bool {
 //
 // Logging: the per-attempt request/response pair stays at V(DebugLogLevel)
 // because every capability group funnels through here, while a failed attempt is
-// reported at the default verbosity — the retry loop discards every intermediate
+// reported at the default verbosity — retry.OnError discards every intermediate
 // error, so an attempt that is retried away would otherwise leave no trace. Both
 // carry the resolved transport (scheme, forced resolution, dial target, mutual
 // TLS) so a connectivity failure can be attributed to the protocol and
@@ -554,7 +555,7 @@ func (r *runtimeClient) call(ctx context.Context, method, path string, reqBody, 
 	// but the last error, and a 4xx that a capability group later reclassifies as
 	// success (e.g. init's 401 on re-init) must not surface as an ERROR entry, so
 	// the error travels as a log value instead of via Error().
-	return retryRuntimeCall(ctx, r.backoff, func() error {
+	return retry.OnError(r.backoff, retriableRuntimeError(ctx), func() error {
 		err := do()
 		if err != nil {
 			log.Info("runtime request attempt failed",
@@ -563,41 +564,6 @@ func (r *runtimeClient) call(ctx context.Context, method, path string, reqBody, 
 		}
 		return err
 	})
-}
-
-// retryRuntimeCall keeps the attempt budget separate from delay evolution:
-// wait.Backoff.Step sets Steps to zero when Cap is reached, which would otherwise
-// exhaust retries before the configured number of attempts.
-func retryRuntimeCall(ctx context.Context, backoff wait.Backoff, call func() error) error {
-	delay := backoff.DelayFunc()
-	retriable := retriableRuntimeError(ctx)
-	var lastErr error
-	for remaining := backoff.Steps; remaining > 0; remaining-- {
-		if err := ctx.Err(); err != nil {
-			if lastErr != nil {
-				return lastErr
-			}
-			return err
-		}
-		lastErr = call()
-		if lastErr == nil || !retriable(lastErr) || remaining == 1 {
-			return lastErr
-		}
-		d := delay()
-		if backoff.Cap > 0 && d > backoff.Cap {
-			d = backoff.Cap
-		}
-		timer := time.NewTimer(d)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			// Preserve the failed request's error, as retry.OnError did, so
-			// callers retain its classification and operation context.
-			return lastErr
-		case <-timer.C:
-		}
-	}
-	return wait.ErrWaitTimeout
 }
 
 // retriableRuntimeError builds the retry predicate for call. It stops retrying

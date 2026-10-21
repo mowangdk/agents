@@ -322,7 +322,7 @@ legacy CLI (pre-TLS sandboxes):
 ```
 
 During resume, CSI mounts sent through the runtime storage API retain five attempts,
-with retry delays of 200ms, 400ms, 800ms, and at most 1s. The controller applies this
+with retry delays of 125ms, 250ms, 500ms, and 1s. The controller applies this
 per-call policy while `Resumed=True` and `RuntimeInitialized` is not yet true.
 Create/claim mounts retain the default retry schedule. Runtime initialization,
 token propagation, and legacy CLI mounts retain their existing policies. The 1s
