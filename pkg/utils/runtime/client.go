@@ -574,6 +574,9 @@ func retryRuntimeCall(ctx context.Context, backoff wait.Backoff, call func() err
 	var lastErr error
 	for remaining := backoff.Steps; remaining > 0; remaining-- {
 		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return lastErr
+			}
 			return err
 		}
 		lastErr = call()
@@ -588,7 +591,9 @@ func retryRuntimeCall(ctx context.Context, backoff wait.Backoff, call func() err
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			// Preserve the failed request's error, as retry.OnError did, so
+			// callers retain its classification and operation context.
+			return lastErr
 		case <-timer.C:
 		}
 	}
