@@ -376,6 +376,7 @@ func TestRetryRuntimeCall(t *testing.T) {
 		wantErr   error
 	}{
 		{name: "cap preserves attempt budget", backoff: wait.Backoff{Duration: time.Millisecond, Factor: 2, Cap: 3 * time.Millisecond, Steps: 5}, succeedAt: 5, wantCalls: 5},
+		{name: "initial delay above cap is clamped", backoff: wait.Backoff{Duration: time.Hour, Factor: 2, Cap: time.Millisecond, Steps: 5}, succeedAt: 5, wantCalls: 5},
 		{name: "exhaustion preserves last error", backoff: wait.Backoff{Duration: time.Millisecond, Factor: 2, Cap: 3 * time.Millisecond, Steps: 5}, wantCalls: 5, wantErr: transient},
 		{name: "cancel interrupts long backoff and preserves last error", backoff: wait.Backoff{Duration: time.Hour, Steps: 5}, cancel: true, wantCalls: 1, wantErr: transient},
 		{name: "deadline interrupts long backoff and preserves last error", backoff: wait.Backoff{Duration: time.Hour, Steps: 5}, timeout: 10 * time.Millisecond, wantCalls: 1, wantErr: transient},
